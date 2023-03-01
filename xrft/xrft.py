@@ -39,10 +39,10 @@ def _fft_module(da):
         return np.fft
 
 
-def _apply_window(da, dims, window_type="hann"):
+def _apply_window(da, dims, window_type="hann"):  # noqa
     """Creating windows in dimensions dims."""
 
-    if window_type == True:
+    if window_type == True:  # noqa
         window_type = "hann"
         warnings.warn(
             "Please provide the name of window adhering to scipy.signal.windows. The boolean option will be deprecated in future releases.",
@@ -106,7 +106,7 @@ def _apply_window(da, dims, window_type="hann"):
     return reduce(operator.mul, windows[::-1]), da * reduce(operator.mul, windows[::-1])
 
 
-def _stack_chunks(da, dim, suffix="_segment"):
+def _stack_chunks(da, dim, suffix="_segment"):  # noqa
     """Reshape a DataArray so there is only one chunk along dimension `dim`"""
     data = da.data
     attr = da.attrs
@@ -153,7 +153,7 @@ def _freq(N, delta_x, real, shift):
     k = [fftfreq(Nx, dx) for (fftfreq, Nx, dx) in zip(fftfreq, N, delta_x)]
 
     if shift:
-        k = [np.fft.fftshift(l) for l in k]
+        k = [np.fft.fftshift(l) for l in k]  # noqa
 
     return k
 
@@ -173,7 +173,7 @@ def _ifreq(N, delta_x, real, shift):
     k = [fftfreq(Nx, dx) for (fftfreq, Nx, dx) in zip(fftfreq, N, delta_x)]
 
     if shift:
-        k = [np.fft.fftshift(l) for l in k]
+        k = [np.fft.fftshift(l) for l in k]  # noqa
 
     return k
 
@@ -195,7 +195,7 @@ def _new_dims_and_coords(da, dim, wavenm, prefix):
     return new_coords, swap_dims
 
 
-def _diff_coord(coord):
+def _diff_coord(coord):  # noqa
     """Returns the difference as a xarray.DataArray."""
 
     v0 = coord.values[0]
@@ -213,7 +213,7 @@ def _diff_coord(coord):
         return np.diff(coord)
 
 
-def _lag_coord(coord):
+def _lag_coord(coord):  # noqa
     """Returns the coordinate lag"""
 
     v0 = coord.values[0]
@@ -237,7 +237,7 @@ def _lag_coord(coord):
 
 def dft(
     da, dim=None, true_phase=False, true_amplitude=False, **kwargs
-):  # pragma: no cover
+):  # noqa
     """
     Deprecated function. See fft doc
     """
@@ -253,7 +253,7 @@ def dft(
 
 def idft(
     daft, dim=None, true_phase=False, true_amplitude=False, **kwargs
-):  # pragma: no cover
+):  # noqa
     """
     Deprecated function. See ifft doc
     """
@@ -317,8 +317,10 @@ def fft(
     true_amplitude=True,
     chunks_to_segments=False,
     prefix="freq_",
+    factors=None,
+    shape=None,
     **kwargs,
-):
+):  # noqa
     """
     Perform discrete Fourier transform of xarray data-array `da` along the
     specified dimensions.
@@ -362,6 +364,12 @@ def fft(
         Whether the data is chunked along the axis to take FFT.
     prefix : str
         The prefix for the new transformed dimensions.
+    shape : dict, optional
+        Shape (length of each transformed dimension) of the output used for FFT computation as {dim: length}.
+        Along any axis, if the given shape is smaller than that of the input, the input is cropped.
+        If it is larger, the input is padded with zeros.
+        If `shape` is not given, the shape of the input along the dimensions specified by `dim` is used.
+        If provided, set attribute `ifft_size` for each transformed dimension coordinate.
 
     Returns
     -------
@@ -406,9 +414,16 @@ def fft(
 
     # the axes along which to take ffts
     axis_num = [da.get_axis_num(d) for d in dim]
-
-    N = [da.shape[n] for n in axis_num]
-
+    
+    # custom shape of FFT output from (a) user input (`shape`) or (b) dimension sizes (default)
+    shape = {} if shape is None else {d: shape.get(d, da.shape[i]) for i, d in zip(axis_num, dim)}
+    # print('[FFT] shape:', shape)
+    
+    # shape (length of each transformed axis) for output
+    N = [int(shape.get(da.dims[n], da.shape[n])) for n in axis_num]
+    # print('[FFT] N (shape):   ', N)
+    # print('[FFT] N (original):', [da.shape[n] for n in axis_num])
+    
     # raise error if there are multiple coordinates attached to the dimension(s) over which the FFT is taken
     for d in dim:
         bad_coords = [
@@ -422,6 +437,8 @@ def fft(
 
     delta_x = [_get_coordinate_spacing(da[d], spacing_tol) for d in dim]
     lag_x = [_lag_coord(da[d]) for d in dim]
+    # print('[FFT] delta_x:', delta_x)
+    # print('[FFT] lag_x:', lag_x)
 
     if detrend is not None:
         if detrend == "linear":
@@ -439,20 +456,25 @@ def fft(
         ]  # handling decreasing coordinates
         f = fft_fn(
             fftm.ifftshift(np.flip(da, axis=reversed_axis), axes=axis_num),
+            s=N,  # explicitly set length of transformed axis (equals adjusted `N`)
             axes=axis_num,
         )
     else:
-        f = fft_fn(da.data, axes=axis_num)
+        f = fft_fn(da.data, s=N, axes=axis_num)  # explicitly set length of transformed axis (equals adjusted `N`)
 
     if shift:
         f = fftm.fftshift(f, axes=axis_num)
-
+        
+    # print('[FFT] N, delta_x, real_dim, shift:', N, delta_x, real_dim, shift)
     k = _freq(N, delta_x, real_dim, shift)
+    # print('[FFT] k.size:', [x.size for x in k], k[0][0], '-->', k[0][-1])
 
     newcoords, swap_dims = _new_dims_and_coords(da, dim, k, prefix)
+    
     daft = xr.DataArray(
         f, dims=da.dims, coords=dict([c for c in da.coords.items() if c[0] not in dim])
     )
+    
     daft = daft.swap_dims(swap_dims).assign_coords(newcoords)
     daft = daft.drop([d for d in dim if d in daft.coords])
 
@@ -471,6 +493,10 @@ def fft(
 
     if true_amplitude:
         daft = daft * np.prod(delta_x)
+        
+    if len(shape) > 0:  # add metadata if custom FFT shape is provided
+        for d in updated_dims:
+            daft[d].attrs.update({"ifft_size": da.shape[daft.get_axis_num(d)]})
 
     return daft.transpose(
         *[swap_dims.get(d, d) for d in rawdims]
@@ -488,8 +514,9 @@ def ifft(
     chunks_to_segments=False,
     prefix="freq_",
     lag=None,
+    shape=None,
     **kwargs,
-):
+):  # noqa
     """
     Perform inverse discrete Fourier transform of xarray data-array `daft` along the
     specified dimensions.
@@ -528,7 +555,12 @@ def ifft(
         If defined, lag must have same length as dim.
         If lag is a sequence, a None element means that 'direct_lag' attribute will be used for the corresponding dimension
         Manually set lag to zero to get output coordinates centered on zero.
-
+    shape : dict, optional
+        Shape (length along each transformed dimension) to use from the input used for FFT computation as {dim: length}.
+        Along any axis, if the given shape is smaller than that of the input, the input is cropped.
+        If it is larger, the input is padded with zeros.
+        If `shape` is not given and the attribute `ifft_size` is not available,
+        the shape of the input along the dimensions specified by `dim` is used.
 
     Returns
     -------
@@ -557,8 +589,8 @@ def ifft(
 
     if lag is None:
         lag = [daft[d].attrs.get("direct_lag", 0.0) for d in dim]
-        msg = "Default ifft's behaviour (lag=None) changed! Default value of lag was zero (centered output coordinates) and is now set to transformed coordinate's attribute: 'direct_lag'."
-        warnings.warn(msg, FutureWarning)
+        # msg = "Default ifft's behaviour (lag=None) changed! Default value of lag was zero (centered output coordinates) and is now set to transformed coordinate's attribute: 'direct_lag'."
+        # warnings.warn(msg, FutureWarning)
     else:
         if isinstance(lag, float) or isinstance(lag, int):
             lag = [lag]
@@ -593,35 +625,70 @@ def ifft(
 
     # the axes along which to take ffts
     axis_num = [daft.get_axis_num(d) for d in dim]
-
-    N = [daft.shape[n] for n in axis_num]
+    
+    # custom shape of FFT output from (a) user input (`shape`) or (b) DataArray attributes ("ifft_size")
+    shape = {} if shape is None else shape
+    shape_dim = {d: shape.get(d, daft[d].attrs.get('ifft_size', daft[d].size)) for d in dim}
+    # print('[IFFT] daft.shape:', daft.shape)
+    # print('[IFFT] shape:    ', shape)
+    # print('[IFFT] shape_dim:', shape_dim)
+    
+    # check if one of the specified dimensions is truncated
+    dims_truncated = {d: daft[d].attrs['nfft'] for d in rawdims if prefix in d and 'nfft' in daft[d].attrs}
+    
+    # shape (length along each transformed axis) from input
+    N = [dims_truncated.get(d, daft.shape[n]) for d, n in zip(dim, axis_num)]
+    # print('[IFFT] dims_truncated:', dims_truncated)
+    # print('[IFFT] N (original):', [daft.shape[n] for n in axis_num])
+    # print('[IFFT] N (adjusted):', N)
 
     daft = daft.sortby(dim)  # sort by coordinates to handle fftshifted grids
     delta_x = [_get_coordinate_spacing(daft[d], spacing_tol) for d in dim]
     for d in dim:
-        l = _lag_coord(daft[d]) if d is not real_dim else daft[d][0].data
+        l = _lag_coord(daft[d]) if d is not real_dim else daft[d][0].data  # noqa
         if np.abs(l) > spacing_tol:
             raise ValueError(
                 "Inverse Fourier Transform can not be computed because coordinate %s is not centered on zero frequency"
                 % d
             )
-
+    # print('[IFFT] delta_x (original):', delta_x)
+    delta_x = [
+        dx * (daft[d].size - 1) * 2 / shape_dim[d]  # real dim is only half the frequency points
+        if real_dim == d
+        else dx * daft[d].size / shape_dim[d]
+        for dx, d in zip(delta_x, dim)
+    ]  # adjust spacing by factor corresponding to shape
+    # print('[IFFT] delta_x (adjusted, shape):', delta_x)
+    
     axis_shift = [
         daft.get_axis_num(d) for d in dim if d is not real_dim
     ]  # remove real dim of the list
-
+    
     f = fftm.ifftshift(
         daft.data, axes=axis_shift
     )  # Force to be on fftshift grid before Fourier Transform
-    f = fft_fn(f, axes=axis_num)
-
+    
+    s = N.copy()
+    if real_dim is not None:
+        s[-1] = 2 * (s[-1] - 1)  # last axis is assumed to have only positive frequency points
+    # print('[IFFT] s:', s)
+    f = fft_fn(f, s=s, axes=axis_num)  # explicitly set length of transformed axis
+    # print('[IFFT] f.shape:', f.shape)
+    # print('[IFFT] slices (shape): ', tuple(slice(shape_dim.get(d, None)) for d in daft.dims))
+    f = f[tuple(slice(shape_dim.get(d, None)) for d in daft.dims)]  # crop zero-padded output to actual length
+    # print('[IFFT] f.shape:', f.shape)
+    
     if not true_phase:
         f = fftm.ifftshift(f, axes=axis_num)
 
     if shift:
         f = fftm.fftshift(f, axes=axis_num)
-
-    k = _ifreq(N, delta_x, real_dim, shift)
+    
+    # adjust shape (length along each transformed axis) if custom shape is provided
+    N_out = [n // 2 + 1 if real_dim == d else n for d, n in shape_dim.items()]
+    # print('[IFFT] N_out, delta_x, real_dim, shift:', N_out, delta_x, real_dim, shift)
+    k = _ifreq(N_out, delta_x, real_dim, shift)
+    # print('[IFFT] k.size:', [x.size for x in k], k[0][0], '-->', k[0][-1])
 
     newcoords, swap_dims = _new_dims_and_coords(daft, dim, k, prefix)
     da = xr.DataArray(
@@ -685,7 +752,7 @@ def _psd_real_dim_scaling(da, ps, real_dim, updated_dims):
 
 def power_spectrum(
     da, dim=None, real_dim=None, scaling="density", window_correction=False, **kwargs
-):
+):  # noqa
     """
     Calculates the power spectrum of da.
 
@@ -760,7 +827,7 @@ def cross_spectrum(
     window_correction=False,
     true_phase=True,
     **kwargs,
-):
+):  # noqa
     """
     Calculates the cross spectra of da1 and da2.
 
@@ -836,7 +903,7 @@ def cross_spectrum(
     return cs
 
 
-def cross_phase(da1, da2, dim=None, true_phase=True, **kwargs):
+def cross_phase(da1, da2, dim=None, true_phase=True, **kwargs):  # noqa
     """
     Calculates the cross-phase between da1 and da2.
 
@@ -883,7 +950,7 @@ def _binned_agg(
     func,
     fill_value,
     dtype,
-) -> np.ndarray:
+) -> np.ndarray:  # noqa
     """NumPy helper function for aggregating over bins."""
 
     try:
@@ -895,7 +962,7 @@ def _binned_agg(
 
     mask = np.logical_not(np.isnan(indices))
     int_indices = indices[mask].astype(int)
-    shape = array.shape[: -indices.ndim] + (num_bins,)
+    shape = array.shape[: -indices.ndim] + (num_bins,)  # noqa
     result = numpy_groupies.aggregate(
         int_indices,
         array[..., mask],
@@ -946,7 +1013,7 @@ def _groupby_bins_agg(
     return result
 
 
-def isotropize(ps, fftdim, nfactor=4, truncate=True, complx=False):
+def isotropize(ps, fftdim, nfactor=4, truncate=True, complx=False):  # noqa
     """
     Isotropize a 2D power spectrum or cross spectrum
     by taking an azimuthal average.
@@ -1022,7 +1089,7 @@ def isotropic_power_spectrum(
     nfactor=4,
     truncate=False,
     **kwargs,
-):
+):  # noqa
     """
     Calculates the isotropic spectrum from the
     two-dimensional power spectrum by taking the
@@ -1108,7 +1175,7 @@ def isotropic_cross_spectrum(
     nfactor=4,
     truncate=False,
     **kwargs,
-):
+):  # noqa
     """
     Calculates the isotropic spectrum from the
     two-dimensional power spectrum by taking the
@@ -1187,7 +1254,7 @@ def isotropic_cross_spectrum(
     return isotropize(cs, fftdim, nfactor=nfactor, truncate=truncate, complx=True)
 
 
-def fit_loglog(x, y):
+def fit_loglog(x, y):  # noqa
     """
     Fit a line to isotropic spectra in log-log space
 
