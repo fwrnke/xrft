@@ -39,7 +39,7 @@ def _fft_module(da):
         return np.fft
 
 
-def _apply_window(da, dims, window_type="hann"):  # noqa
+def _apply_window(da, dims, real_dim, window_type="hann"):  # noqa
     """Creating windows in dimensions dims."""
 
     if window_type == True:  # noqa
@@ -98,7 +98,9 @@ def _apply_window(da, dims, window_type="hann"):  # noqa
 
     windows = [
         xr.DataArray(
-            win_func(len(da[d]), sym=False), dims=da[d].dims, coords=da[d].coords
+            win_func(len(da[d]) * 2 , sym=False)[len(da[d]):] if real_dim == d else win_func(len(da[d]), sym=False),  # half window for rfftn
+            dims=da[d].dims,
+            coords=da[d].coords
         )
         for d in dims
     ]
@@ -448,7 +450,7 @@ def fft(
             da = _detrend(da, dim, detrend_type=detrend)
 
     if window is not None:
-        _, da = _apply_window(da, dim, window_type=window)
+        _, da = _apply_window(da, dim, real_dim, window_type=window)  # consider `real_dim` when building window function
 
     if true_phase:
         reversed_axis = [
@@ -653,10 +655,10 @@ def ifft(
             )
     # print('[IFFT] delta_x (original):', delta_x)
     delta_x = [
-        dx * (daft[d].size - 1) * 2 / shape_dim[d]  # real dim is only half the frequency points
+        dx * (N[i] - 1) * 2 / shape_dim[d]  # real dim is only half the frequency points
         if real_dim == d
         else dx * daft[d].size / shape_dim[d]
-        for dx, d in zip(delta_x, dim)
+        for i, (dx, d) in enumerate(zip(delta_x, dim))
     ]  # adjust spacing by factor corresponding to shape
     # print('[IFFT] delta_x (adjusted, shape):', delta_x)
     
