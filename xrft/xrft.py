@@ -721,7 +721,7 @@ def _window_correction_factor(da, dim, scaling, window):
         raise ValueError(
             "window_correction can only be applied when windowing is turned on."
         )
-    windows, _ = _apply_window(da, dim, window_type=window)
+    windows, _ = _apply_window(da, dim, real_dim=None, window_type=window)
     if scaling == "density":
         return (windows**2).mean()
     elif scaling == "spectrum":
