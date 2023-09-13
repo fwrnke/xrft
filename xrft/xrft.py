@@ -31,6 +31,14 @@ __all__ = [
     "fit_loglog",
 ]
 
+DEBUG = False
+
+xprint = print
+def print(*args, **kwargs):
+    """Wrap print function for debugging purposes."""
+    if DEBUG:
+        xprint(*args, **kwargs)
+
 
 def _fft_module(da):
     if da.chunks:
@@ -574,10 +582,12 @@ def ifft(
     else:
         if isinstance(dim, str):
             dim = [dim]
+    print('[IFFT] dim:', dim)
 
     if "real" in kwargs:
         real_dim = kwargs.get("real")
         warnings.warn(_real_flag_warning, FutureWarning)
+    print('[IFFT] real_dim:', real_dim)
 
     if real_dim is not None:
         if real_dim not in daft.dims:
@@ -605,7 +615,7 @@ def ifft(
             daft[d].attrs.get("direct_lag") if l is None else l
             for d, l in zip(dim, lag)
         ]  # enable lag of the form [3.2, None, 7]
-    # print('[IFFT] lag:', lag)
+    print('[IFFT] lag:', lag)
 
     if true_phase:
         for d, l in zip(dim, lag):
@@ -628,23 +638,27 @@ def ifft(
 
     # the axes along which to take ffts
     axis_num = [daft.get_axis_num(d) for d in dim]
+    print('[IFFT] axis_num:', axis_num)
     
     # custom shape of FFT output from (a) user input (`shape`) or (b) DataArray attributes ("ifft_size")
     USE_SHAPE = shape is not None
+    print('[IFFT] USE_SHAPE:', USE_SHAPE)
     shape = {} if not USE_SHAPE else shape
     shape_dim = {d: shape.get(d, daft[d].attrs.get('ifft_size', daft[d].size)) for d in dim}
-    # print('[IFFT] daft.shape:', daft.shape)
-    # print('[IFFT] shape:    ', shape)
-    # print('[IFFT] shape_dim:', shape_dim)
+    print('[IFFT] daft.shape:', daft.shape)
+    print('[IFFT] shape:    ', shape)
+    print('[IFFT] shape_dim:', shape_dim)
+    print('[IFFT] shape_dim (options):', [(daft[d].attrs.get('ifft_size', None), daft[d].size) for d in dim])
+    USE_SHAPE = True if daft[d].attrs.get('ifft_size') is not None else False
     
     # check if one of the specified dimensions is truncated
     dims_truncated = {d: daft[d].attrs['nfft'] for d in rawdims if prefix in d and 'nfft' in daft[d].attrs}
     
     # shape (length along each transformed axis) from input
     N = [dims_truncated.get(d, daft.shape[n]) for d, n in zip(dim, axis_num)]
-    # print('[IFFT] dims_truncated:', dims_truncated)
-    # print('[IFFT] N (original):', [daft.shape[n] for n in axis_num])
-    # print('[IFFT] N (adjusted):', N)
+    print('[IFFT] dims_truncated:', dims_truncated)
+    print('[IFFT] N (original):', [daft.shape[n] for n in axis_num])
+    print('[IFFT] N (adjusted):', N)
 
     daft = daft.sortby(dim)  # sort by coordinates to handle fftshifted grids
     delta_x = [_get_coordinate_spacing(daft[d], spacing_tol) for d in dim]
@@ -655,7 +669,7 @@ def ifft(
                 "Inverse Fourier Transform can not be computed because coordinate %s is not centered on zero frequency"
                 % d
             )
-    # print('[IFFT] delta_x (original):', delta_x)
+    print('[IFFT] delta_x (original):', delta_x)
     if USE_SHAPE:
         delta_x = [
             dx * (N[i] - 1) * 2 / shape_dim[d]  # real dim is only half the frequency points
@@ -663,7 +677,7 @@ def ifft(
             else dx * daft[d].size / shape_dim[d]
             for i, (dx, d) in enumerate(zip(delta_x, dim))
         ]  # adjust spacing by factor corresponding to shape
-        # print('[IFFT] delta_x (adjusted, shape):', delta_x)
+        print('[IFFT] delta_x (adjusted, shape):', delta_x)
     
     axis_shift = [
         daft.get_axis_num(d) for d in dim if d is not real_dim
@@ -676,13 +690,13 @@ def ifft(
     s = N.copy()
     if real_dim is not None:
         s[-1] = 2 * (s[-1] - 1)  # last axis is assumed to have only positive frequency points
-    # print('[IFFT] s:', s)
+    print('[IFFT] s:', s)
     f = fft_fn(f, s=s, axes=axis_num)  # explicitly set length of transformed axis
-    # print('[IFFT] f.shape:', f.shape)
-    # print('[IFFT] slices (shape): ', tuple(slice(shape_dim.get(d, None)) for d in daft.dims))
+    print('[IFFT] f.shape:', f.shape)
+    print('[IFFT] slices (shape): ', tuple(slice(shape_dim.get(d, None)) for d in daft.dims))
     if USE_SHAPE:
         f = f[tuple(slice(shape_dim.get(d, None)) for d in daft.dims)]  # crop zero-padded output to actual length
-        # print('[IFFT] f.shape:', f.shape)
+        print('[IFFT] f.shape:', f.shape)
     
     if not true_phase:
         f = fftm.ifftshift(f, axes=axis_num)
@@ -691,27 +705,29 @@ def ifft(
         f = fftm.fftshift(f, axes=axis_num)
     
     # adjust shape (length along each transformed axis) if custom shape is provided
+    # N_out = [n // 2 + 1 if real_dim == d else n for d, n in shape_dim.items()]
     if USE_SHAPE:
         N_out = [n // 2 + 1 if real_dim == d else n for d, n in shape_dim.items()]
     else:
         N_out = [daft.shape[n] for n in axis_num]
+    print('[IFFT] N_out:', [n // 2 + 1 if real_dim == d else n for d, n in shape_dim.items()], [daft.shape[n] for n in axis_num])
     # N_out = [2001]
     # delta_x = [0.01]
-    # print('[IFFT] N_out, delta_x, real_dim, shift:', N_out, delta_x, real_dim, shift)
+    print('[IFFT] N_out, delta_x, real_dim, shift:', N_out, delta_x, real_dim, shift)
     k = _ifreq(N_out, delta_x, real_dim, shift)
-    # print('[IFFT] k.size:', [x.size for x in k], k[0][0], '-->', k[0][-1])
+    print('[IFFT] k.size:', [x.size for x in k], k[0][0], '-->', k[0][-1])
 
     newcoords, swap_dims = _new_dims_and_coords(daft, dim, k, prefix)
-    # print('[IFFT] newcoords:', newcoords)
-    # print('[IFFT] swap_dims:', swap_dims)
+    print('[IFFT] newcoords:', newcoords)
+    print('[IFFT] swap_dims:', swap_dims)
     da = xr.DataArray(
         f,
         dims=daft.dims,
         coords=dict([c for c in daft.coords.items() if c[0] not in dim]),
     )
-    # print(da)
     da = da.swap_dims(swap_dims).assign_coords(newcoords)
     da = da.drop([d for d in dim if d in da.coords])
+    print(da)
 
     with xr.set_options(
         keep_attrs=True
@@ -719,10 +735,12 @@ def ifft(
         for d, l in zip(dim, lag):
             tfd = swap_dims[d]
             da = da.assign_coords({tfd: da[tfd] + l})
+    print(da)
 
     if true_amplitude:
         da = da / np.prod([float(da[up_dim].spacing) for up_dim in swap_dims.values()])
-
+    print([da[d] for d in swap_dims.values()])
+    
     return da.transpose(
         *[swap_dims.get(d, d) for d in rawdims]
     )  # Do nothing if daft was not transposed
